@@ -1,60 +1,90 @@
-import torch
-from ultralytics import YOLO
+import logging
+
 import cv2
+import gradio as gr
 import numpy as np
-import tempfile
 from pathlib import Path
 from tqdm.auto import tqdm
+from ultralytics import YOLO
 
 import deep_sort.deep_sort.deep_sort as ds
 
-import gradio as gr
 
 # 控制处理流程是否终止
 should_continue = True
 
+# 置信度阈值
+CONFIDENCE_THRESHOLD = 0.2
+# IOU阈值
+IOU_THRESHOLD = 0.5
 
-def get_device():
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# 设置日志记录
+logging.basicConfig(
+    filename="log.txt",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 
 
-def get_detectable_classes(model_file):
-    """获取给定模型文件可以检测的类别。
+def get_detectable_classes(model_file: str) -> list:
+    """
+    获取给定模型文件可以检测的类别
 
-    参数:
-    - model_file: 模型文件名。
+    Args:
+        model_file (str): 模型文件名
 
-    返回:
-    - class_names: 可检测的类别名称。
+    Returns:
+        list: 可检测的类别名称列表
     """
     model = YOLO(model_file)
-    class_names = list(model.names.values())  # 直接获取类别名称列表
+    class_names = list(model.names.values())  # 获取类别名称列表
     del model  # 删除模型实例释放资源
     return class_names
 
 
-# 用于终止视频处理
-def stop_processing():
+def stop_processing() -> str:
+    """
+    终止视频处理
+
+    Returns:
+        str: 终止处理的状态消息
+    """
     global should_continue
     should_continue = False  # 更改变量来停止处理
     return "尝试终止处理..."
 
 
-# 用于开始视频处理
 def start_processing(
-    input_path,
-    output_path,
-    detect_class,
-    model,
-    is_obb=True,
-    progress=gr.Progress(track_tqdm=True),
-):
+    input_path: str,
+    output_path: str,
+    detect_class: int,
+    model: str,
+    is_obb: bool = True,
+    progress: gr.Progress = gr.Progress(track_tqdm=True),
+) -> tuple:    
+    """
+    开始视频处理
+
+    Args:
+        input_path (str): 输入视频路径
+        output_path (str): 输出视频路径
+        detect_class (int): 要检测的类别索引
+        model (str): 模型文件路径
+        is_obb (bool, optional): 是否使用OBB检测. 默认为 True
+        progress (gr.Progress, optional): Gradio进度条对象. 默认为 gr.Progress(track_tqdm=True)
+
+    Returns:
+        tuple: 输出视频路径的元组
+    """
     global should_continue
     should_continue = True
 
     detect_class = int(detect_class)
+    # 创建YOLO模型实例
     model = YOLO(model)
+    # 创建DeepSort跟踪器实例
     tracker = ds.DeepSort("deep_sort/deep_sort/deep/checkpoint/ckpt.t7")
+    
     output_video_path = detect_and_track(
         input_path, output_path, detect_class, model, tracker, is_obb
     )
@@ -62,25 +92,27 @@ def start_processing(
 
 
 def putTextWithBackground(
-    img,
-    text,
-    origin,
-    font=cv2.FONT_HERSHEY_SIMPLEX,
-    font_scale=1,
-    text_color=(255, 255, 255),
-    bg_color=(0, 0, 0),
-    thickness=1,
-):
-    """绘制带有背景的文本。
+    img: np.ndarray,
+    text: str,
+    origin: tuple,
+    font: int = cv2.FONT_HERSHEY_SIMPLEX,
+    font_scale: float = 1,
+    text_color: tuple = (255, 255, 255),
+    bg_color: tuple = (0, 0, 0),
+    thickness: int = 1,
+) -> None:
+    """
+    绘制带有背景的文本
 
-    :param img: 输入图像。
-    :param text: 要绘制的文本。
-    :param origin: 文本的左上角坐标。
-    :param font: 字体类型。
-    :param font_scale: 字体大小。
-    :param text_color: 文本的颜色。
-    :param bg_color: 背景的颜色。
-    :param thickness: 文本的线条厚度。
+    Args:
+        img (np.ndarray): 输入图像
+        text (str): 要绘制的文本
+        origin (tuple): 文本的左上角坐标
+        font (int, optional): 字体类型. 默认为 cv2.FONT_HERSHEY_SIMPLEX
+        font_scale (float, optional): 字体大小. 默认为 1
+        text_color (tuple, optional): 文本的颜色. 默认为 (255, 255, 255)
+        bg_color (tuple, optional): 背景的颜色. 默认为 (0, 0, 0)
+        thickness (int, optional): 文本的线条厚度. 默认为 1
     """
     # 计算文本的尺寸
     (text_width, text_height), _ = cv2.getTextSize(text, font, font_scale, thickness)
@@ -107,16 +139,23 @@ def putTextWithBackground(
     )
 
 
-def extract_detections(results, detect_class, is_obb=True):
+def extract_detections(results: list, detect_class: int, is_obb: bool = True) -> tuple:
     """
-    从模型结果中提取和处理检测信息。
-    - results: YoloV8模型预测结果
-    - detect_class: 需要提取的目标类别的索引
-    - is_obb: 是否为OBB检测结果
-    """
+    从模型结果中提取和处理检测信息
 
+    Args:
+        results (list): YoloV8模型预测结果
+        detect_class (int): 需要提取的目标类别的索引
+        is_obb (bool, optional): 是否为OBB检测结果. 默认为 True
+
+    Returns:
+        tuple: 检测结果、置信度和边界框坐标的元组
+    """
+    # 检测结果列表
     detections = []
+    # 置信度列表
     confarray = []
+    # OBB的最小外接矩形坐标列表
     xyxy_list = []
 
     for r in results:
@@ -127,8 +166,8 @@ def extract_detections(results, detect_class, is_obb=True):
             conf = r.obb.conf
         else:
             boxes = r.boxes.xywh  # 常规格式：x_top-left, y_top-left, width, height
-            cls = r.boxs.cls
-            conf = r.boxs.conf
+            cls = r.boxes.cls
+            conf = r.boxes.conf
 
         for i, (box, cls, conf) in enumerate(zip(boxes, cls, conf)):
             if int(cls) == detect_class:
@@ -151,162 +190,190 @@ def extract_detections(results, detect_class, is_obb=True):
     return detections, confarray, xyxy_list if is_obb else None
 
 
-# 视频处理
 def detect_and_track(
-    input_path: str, output_path: str, detect_class: int, model, tracker, is_obb=True
+    input_path: str,
+    output_path: str,
+    detect_class: int,
+    model: YOLO,
+    tracker: ds.DeepSort,
+    is_obb: bool = True,
 ) -> Path:
     """
-    处理视频，检测并跟踪目标。
-    - input_path: 输入视频文件的路径。
-    - output_path: 处理后视频保存的路径。
-    - detect_class: 需要检测和跟踪的目标类别的索引。
-    - model: 用于目标检测的模型。
-    - tracker: 用于目标跟踪的模型。
+    处理视频，检测并跟踪目标
+
+    Args:
+        input_path (str): 输入视频文件的路径
+        output_path (str): 处理后视频保存的路径
+        detect_class (int): 需要检测和跟踪的目标类别的索引
+        model (YOLO): 用于目标检测的模型
+        tracker (ds.DeepSort): 用于目标跟踪的模型
+        is_obb (bool, optional): 是否使用OBB检测. 默认为 True
+
+    Returns:
+        Path: 处理后的视频文件路径
     """
     global should_continue
-    model = model
-    cap = cv2.VideoCapture(input_path)  # 使用OpenCV打开视频文件。
-    if not cap.isOpened():  # 检查视频文件是否成功打开。
-        print(f"Error opening video file {input_path}")
-        return None
 
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))  # 获取视频总帧数
-    fps = cap.get(cv2.CAP_PROP_FPS)  # 获取视频的帧率
-    size = (
-        int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-        int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-    )  # 获取视频的分辨率（宽度和高度）。
-    output_video_path = Path(output_path) / "output.mp4"  # 设置输出视频的保存路径。
+    try:
+        cap = cv2.VideoCapture(input_path)
+        if not cap.isOpened():
+            raise IOError(f"无法打开视频文件 {input_path}")
 
-    # 设置视频编码格式为XVID格式的avi文件
-    # 如果需要使用h264编码或者需要保存为其他格式，可能需要下载openh264-1.8.0
-    # 下载地址：https://github.com/cisco/openh264/releases/tag/v1.8.0
-    # 下载完成后将dll文件放在当前文件夹内
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    output_video = cv2.VideoWriter(
-        output_video_path.as_posix(), fourcc, fps, size, isColor=True
-    )  # 创建一个VideoWriter对象用于写视频。
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        size = (
+            int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+            int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+        )
+        
+        # 使用MP4V编解码器创建输出视频
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        output_video_path = Path(output_path) / "output.mp4"
+        output_video = cv2.VideoWriter(
+            output_video_path.as_posix(), fourcc, fps, size, isColor=True
+        )
 
-    # 对每一帧图片进行读取和处理
-    # 使用tqdm显示处理进度。
-    for _ in tqdm(range(total_frames)):
-        # 如果全局变量should_continue为False（通常由于GUI上按下Stop按钮），则终止目标检测和跟踪，返回已处理的视频部分
-        if not should_continue:
-            print("stopping process")
-            break
+        # 逐帧处理视频
+        for _ in tqdm(range(total_frames)):
+            if not should_continue:
+                logging.info("正在停止处理")
+                break
 
-        success, frame = cap.read()  # 逐帧读取视频。
+            success, frame = cap.read()
+            if not success:
+                logging.debug("无法读取视频帧")
+                break
 
-        # 如果读取失败（或者视频已处理完毕），则跳出循环。
-        if not (success):
-            break
-
-        # 使用YoloV8模型对当前帧进行目标检测。
-        results = model(frame, stream=True, conf=0.2, iou=0.5)
-
-        # 从预测结果中提取检测信息。
-        detections, confarray, xyxy = extract_detections(results, detect_class, is_obb)
-
-        if len(detections) == 0:
-            continue  # 如果没有检测到任何物体，跳过当前帧
-
-        if is_obb:
-            resultsTracker = tracker.update_obb(detections, confarray, frame, xyxy)
-        else:
-            resultsTracker = tracker.update(detections, confarray, frame)
-
-        for *box, Id in resultsTracker:
-            if is_obb:
-                # 将 box[:8] 转换为 NumPy 数组，然后调用 reshape 方法
-                xyxyxyxy = np.array(box[:8]).reshape((4, 2)).astype(int)
-                draw_rotated_box(frame, xyxyxyxy, (255, 0, 255), 3)
-            else:
-                x, y, w, h = map(int, box)
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 255), 3)
-
-            putTextWithBackground(
-                frame,
-                str(int(Id)),
-                (max(-10, xyxyxyxy[0][0] if is_obb else x), max(40, xyxyxyxy[0][1] if is_obb else y)),
-                font_scale=1.5,
-                text_color=(255, 255, 255),
-                bg_color=(255, 0, 255),
+            results = model(
+                frame, stream=True, conf=CONFIDENCE_THRESHOLD, iou=IOU_THRESHOLD
             )
 
-        output_video.write(frame)  # 将处理后的帧写入到输出视频文件中。
+            detections, confarray, xyxy = extract_detections(
+                results, detect_class, is_obb
+            )
 
-    output_video.release()  # 释放VideoWriter对象。
-    cap.release()  # 释放视频文件。
+            if len(detections) == 0:
+                logging.debug("未检测到任何目标")
+                continue
 
-    print(f"output dir is: {output_video_path}")
+            # 更新跟踪器
+            if is_obb:
+                resultsTracker = tracker.update_obb(detections, confarray, frame, xyxy)
+            else:
+                resultsTracker = tracker.update(detections, confarray, frame)
+
+            # 绘制检测和跟踪结果
+            for *box, Id in resultsTracker:
+                if is_obb:
+                    xyxyxyxy = np.array(box[:8]).reshape((4, 2)).astype(int)
+                    draw_rotated_box(frame, xyxyxyxy, (255, 0, 255), 3)
+                else:
+                    x, y, w, h = map(int, box)
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 255), 3)
+
+                putTextWithBackground(
+                    frame,
+                    str(int(Id)),
+                    (
+                        max(-10, xyxyxyxy[0][0] if is_obb else x),
+                        max(40, xyxyxyxy[0][1] if is_obb else y),
+                    ),
+                    font_scale=1.5,
+                    text_color=(255, 255, 255),
+                    bg_color=(255, 0, 255),
+                )
+
+            output_video.write(frame)
+
+    except Exception as e:
+        logging.error(f"处理视频时发生错误: {e}")
+    finally:
+        if "output_video" in locals():
+            output_video.release()
+        if "cap" in locals():
+            cap.release()
+
+    logging.info(f"输出目录为: {output_video_path}")
     return output_video_path
 
 
-def draw_rotated_box(img, xyxyxyxy, color, thickness):
-    """绘制旋转的边界框"""
+def draw_rotated_box(
+    img: np.ndarray, xyxyxyxy: np.ndarray, color: tuple, thickness: int
+) -> None:
+    """
+    绘制旋转的边界框
+
+    Args:
+        img (np.ndarray): 输入图像
+        xyxyxyxy (np.ndarray): 旋转边界框的坐标
+        color (tuple): 边界框的颜色
+        thickness (int): 边界框的线条厚度
+    """
     cv2.drawContours(img, [xyxyxyxy], 0, color, thickness)
 
 
-if __name__ == "__main__":
-    # 模型列表，从左往右由小到大，第一次使用会自动下载
-    model_list = ["yolov8-obb-v3-best.pt"]
+def main():
+    # 模型列表
+    MODEL_LIST = ["models/yolov8-obb-v3-best.pt", "models/yolov8-obb-v3-best.engine"]
 
-    # 获取YoloV8模型可以检测的所有类别，默认调用model_list中第一个模型
-    detect_classes = get_detectable_classes(model_list[0])
+    # 获取模型可以检测的所有类别，默认调用MODEL_LIST中第一个模型
+    detect_classes = get_detectable_classes(MODEL_LIST[0])
 
-    # gradio界面的输入示例，包含一个测试视频文件路径、一个随机生成的输出目录、检测的类别、使用的模型
+    # gradio界面的输入示例
     examples = [
-        ["Uav-Rod-9Fps-30s.webm", tempfile.mkdtemp(), detect_classes[0], model_list[0]],
+        [
+            "data/input/Uav-Rod-9Fps-30s.webm",
+            "data/output",
+            detect_classes[0],
+            MODEL_LIST[0],
+        ],
+        [
+            "data/input/Uav-Rod-9Fps.webm",
+            "data/output",
+            detect_classes[0],
+            MODEL_LIST[0],
+        ],
     ]
 
     # 使用Gradio的Blocks创建一个GUI界面
-    # Gradio参考文档：https://www.gradio.app/guides/blocks-and-event-listeners
     with gr.Blocks() as demo:
         with gr.Tab("Tracking"):
-            # 使用Markdown显示文本信息，介绍界面的功能
             gr.Markdown(
                 """
-                # 目标检测与跟踪
+                # 无人机多目标检测与跟踪
+                
+                选择示例或上传自己的视频文件，选择要检测的类别和模型，然后点击"Process"按钮开始处理。
+                可以使用"Stop"按钮随时终止处理，得到部分处理后的视频。
                 """
             )
-            # 行容器，水平排列元素
             with gr.Row():
-                # 列容器，垂直排列元素
                 with gr.Column():
-                    input_path = gr.Video(
-                        label="Input video"
-                    )  # 视频输入控件，用于上传视频文件
-                    model = gr.Dropdown(
-                        model_list, value=0, label="Model"
-                    )  # 下拉菜单控件，用于选择模型
+                    input_path = gr.Video(label="Input video")
+                    model = gr.Dropdown(MODEL_LIST, value=MODEL_LIST[0], label="Model")
                     detect_class = gr.Dropdown(
-                        detect_classes, value=0, label="Class", type="index"
-                    )  # 下拉菜单控件，用于选择要检测的目标类别
-                    output_dir = gr.Textbox(
-                        label="Output dir", value=tempfile.mkdtemp()
-                    )  # 文本框控件，用于指定输出视频的保存路径，默认为一个临时生成的目录
+                        detect_classes,
+                        value=detect_classes[0],
+                        label="Class",
+                        type="index",
+                    )
+                    output_dir = gr.Textbox(label="Output dir", value="data/output")
                     is_obb = gr.Checkbox(label="Use OBB detection", value=True)
                     with gr.Row():
-                        # 创建两个按钮控件，分别用于开始处理和停止处理
                         start_button = gr.Button("Process")
                         stop_button = gr.Button("Stop")
                 with gr.Column():
-                    output = gr.Video()  # 视频显示控件，展示处理后的输出视频
-                    output_path = gr.Textbox(
-                        label="Output path"
-                    )  # 文本框控件，用于显示输出视频的文件路径
+                    output = gr.Video()
+                    output_path = gr.Textbox(label="Output path")
 
-                    # 添加示例到GUI中，允许用户选择预定义的输入进行快速测试
                     gr.Examples(
                         examples,
                         label="Examples",
                         inputs=[input_path, output_dir, detect_class, model],
                         outputs=[output, output_path],
-                        fn=start_processing,  # 指定处理示例时调用的函数
+                        fn=start_processing,
                         cache_examples=False,
-                    )  # 禁用示例缓存
+                    )
 
-        # 将按钮与处理函数绑定
         start_button.click(
             start_processing,
             inputs=[input_path, output_dir, detect_class, model, is_obb],
@@ -315,3 +382,7 @@ if __name__ == "__main__":
         stop_button.click(stop_processing)
 
     demo.launch()
+
+
+if __name__ == "__main__":
+    main()
