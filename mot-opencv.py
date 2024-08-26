@@ -1,6 +1,7 @@
 import math
 import logging
 import multiprocessing
+import os
 import time
 from queue import Empty
 from typing import List, Tuple
@@ -316,16 +317,29 @@ def display_frames(
 
 
 def main():
-    # 视频文件（支持直播流）和模型文件路径, 视频与模型一一对应，数量相同，表示哪个视频使用哪个模型处理
-    video_files = [
-        "data/input/Uav-Rod-9Fps.webm",
-        "data/input/Uav-Rod-9Fps.webm",
+    # 默认视频目录和模型路径
+    video_directory = "data/input"
+    default_model_path = "models/yolov8-obb-v3-best.pt"
+
+    # 支持的视频文件扩展名和视频流协议
+    video_extensions = ('.mp4', '.webm')
+
+    # 获取视频文件列表
+    video_files = [os.path.join(video_directory, f) for f in os.listdir(video_directory) if f.endswith(video_extensions)]
+
+    # 视频流 URL 支持
+    video_streams = [
+        # "http://example.com/stream1",
+        # "rtsp://example.com/stream2"
     ]
-    model_paths = [
-        "models/yolov8-obb-v3-best.pt",
-        "models/yolov8-obb-v3-best.pt",
-    ]
-    num_videos = len(video_files)
+
+    # 合并视频文件和视频流
+    all_videos = video_files + video_streams
+
+    # 为每个视频文件和视频流分配默认模型
+    model_paths = [default_model_path for _ in all_videos]
+
+    num_videos = len(all_videos)
 
     # 创建进程管理器
     manager = multiprocessing.Manager()

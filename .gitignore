@@ -135,4 +135,7 @@ log.*
 *.log
 
 # ouptut files
-output.*
+data/output
+
+# input files
+data/input

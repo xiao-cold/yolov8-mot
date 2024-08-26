@@ -328,7 +328,7 @@ def main():
             MODEL_LIST[0],
         ],
         [
-            "data/input/Uav-Rod-9Fps.webm",
+            "data/input/Uav-Rod-9Fps-30s.webm",
             "data/output",
             detect_classes[0],
             MODEL_LIST[0],
