@@ -29,6 +29,12 @@ pip install -r requirements.txt
 
 3. 下载旋转目标检测预训练模型并将其放在`models`目录下。
 
+- [yolov8-obb-v3-best.pt](https://drive.filen.io/d/54121a7a-86d6-49a4-87c6-95e202a91e5d#AKQCqMMODmzDlttM5FFZMRAABFLN2GEZ)
+
+4. 将视频文件放在`data/input`目录下。或下载测试视频文件:
+
+- [Uav-Rod-9Fps.mp4](https://drive.filen.io/d/60abebd9-57b6-4695-a369-52f360b09881#gslBaataGbmKbhKrK5jwE0SbrtaYE9QN)
+
 ## 使用方法
 
 ### Web UI界面
