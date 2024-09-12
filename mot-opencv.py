@@ -20,9 +20,9 @@ IOU_THRESHOLD = 0.5
 # 输出视频帧数
 FPS = 12
 # 屏幕宽度
-SCREEN_WIDTH = 2560
+SCREEN_WIDTH = int(2560/1.5)
 # 屏幕高度
-SCREEN_HEIGHT = 1600
+SCREEN_HEIGHT = int(1600/1.5)
 
 logging.basicConfig(
     filename="log.txt",
@@ -241,14 +241,16 @@ def display_frames(
     aspect_ratios = []
     # 视频原始尺寸
     original_sizes = []
-    # 待播帧队列
-    frames = []
+    # 视频布局
+    layout = None
 
     # 读取帧队列中的帧并显示
     while not stop_event.is_set():
+        # 待播帧队列
+        frames = []
         for i, queue in enumerate(frame_queues):
             try:
-                item = queue.get(timeout=1)
+                item = queue.get(timeout=0.5)
                 if item is None:
                     stop_event.set()
                     return
@@ -267,8 +269,9 @@ def display_frames(
         if not frames:
             continue
         # 计算视频布局
-        layout = calculate_layout(
-            len(frames), screen_width, screen_height, aspect_ratios
+        if layout is None:
+            layout = calculate_layout(
+                len(frames), screen_width, screen_height, aspect_ratios
         )
         # 创建合并帧
         combined_frame = np.zeros((screen_height, screen_width, 3), dtype=np.uint8)
